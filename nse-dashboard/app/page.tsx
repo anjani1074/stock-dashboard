@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 
 interface Announcement {
   id: number
-  created_at: string
+  filing_time: string | null
   symbol: string
   Company_name: string
   description: string
@@ -58,6 +58,18 @@ export default function Home() {
         item.description?.toLowerCase().includes(search.toLowerCase())
       )
     })
+
+  function formatDate(dateString: string | null) {
+    if (!dateString) return "—"
+
+    const date = new Date(dateString)
+
+    if (isNaN(date.getTime())) return "—"
+
+    return date.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata"
+    })
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
@@ -120,7 +132,7 @@ export default function Home() {
                   <td className="p-3">{item.Company_name}</td>
                   <td className="p-3">{item.description}</td>
                   <td className="p-3">
-                    {new Date(item.created_at).toLocaleString()}
+                    {formatDate(item.filing_time)}
                   </td>
                   <td className="p-3">
                     <a
