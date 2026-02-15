@@ -5,7 +5,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// Convert NSE date to proper ISO (IST)
+// ✅ Convert NSE date format (15-Feb-2026 14:09:17 → ISO)
 function convertNseDate(nseDate: string) {
   if (!nseDate) return null
 
@@ -20,7 +20,39 @@ function convertNseDate(nseDate: string) {
 
   const month = months[mon]
 
+  if (!month) return null
+
   return `${year}-${month}-${day}T${timePart}+05:30`
+}
+
+// ✅ Keyword Classifier (SAFE)
+function classifyBucket(description: string) {
+  if (!description) return "Other"
+
+  const text = description.toLowerCase()
+
+  if (text.includes("financial results") || text.includes("results"))
+    return "Results"
+
+  if (text.includes("order") || text.includes("contract"))
+    return "Order Win"
+
+  if (text.includes("board meeting"))
+    return "Board Meeting"
+
+  if (text.includes("press release"))
+    return "Press Release"
+
+  if (text.includes("investor presentation"))
+    return "Investor Presentation"
+
+  if (text.includes("acquisition"))
+    return "Acquisition"
+
+  if (text.includes("credit rating"))
+    return "Credit Rating"
+
+  return "Other"
 }
 
 export async function GET() {
@@ -55,20 +87,23 @@ export async function GET() {
       return Response.json({ error: "Invalid NSE data" })
     }
 
+    // 🔥 Transform Data (SAFE)
     const transformed = nseData.map((item: any) => ({
-      seq_id: item.seq_id,   // 🔥 IMPORTANT
+      seq_id: item.seq_id, // 🔑 Critical unique key
       symbol: item.symbol,
       Company_name: item.sm_name,
       description: item.desc,
       announcement: item.attchmntText,
       attachment_url: item.attchmntFile,
-      filing_time: convertNseDate(item.an_dt)
+      filing_time: convertNseDate(item.an_dt),
+      bucket: classifyBucket(item.desc)
     }))
 
+    // ✅ Safe upsert using seq_id (already unique)
     const { error } = await supabase
       .from("announcements")
       .upsert(transformed, {
-        onConflict: "seq_id"   // 🔥 MUST MATCH UNIQUE CONSTRAINT
+        onConflict: "seq_id"
       })
 
     if (error) {
