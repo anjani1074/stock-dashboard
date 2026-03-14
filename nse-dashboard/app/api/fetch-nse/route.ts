@@ -49,15 +49,73 @@ function keywordClassify(
   const desc = description.toLowerCase().trim()
   const ann  = (announcement || "").toLowerCase()
 
-  // ── 1. Newspaper publications — always noise ──────────────────────────────
+  // ── BLOCK LIST — always Other, check first ────────────────────────────────
+
+  // Newspaper publications
   if (
     desc.includes("copy of newspaper") ||
     desc.includes("newspaper publication") ||
-    desc.includes("copy of the newspaper") ||
-    ann.includes("copy of newspaper publication")
+    desc.includes("copy of the newspaper")
   ) return { bucket: "Other", magnitude: "low" }
 
-  // ── 2. Concall & Investor Meet — separate bucket ──────────────────────────
+  // Clarifications about results — not actual results
+  if (
+    desc.includes("clarification") ||
+    desc.includes("clarification - financial") ||
+    desc.includes("clarification-financial")
+  ) return { bucket: "Other", magnitude: "low" }
+
+  // Delayed/non-submission notices — not actual results
+  if (
+    desc.includes("reasons for delayed") ||
+    desc.includes("non-submission of financial") ||
+    desc.includes("delayed submission")
+  ) return { bucket: "Other", magnitude: "low" }
+
+  // Corrigendum — correction notice, not results
+  if (desc.includes("corrigendum")) return { bucket: "Other", magnitude: "low" }
+
+  // Incorporation — new company registration, not capex
+  if (desc === "incorporation") return { bucket: "Other", magnitude: "low" }
+
+  // Board meeting outcomes without results in announcement
+  if (
+    desc === "action(s) taken or orders passed" ||
+    desc === "actions taken or orders passed" ||
+    desc === "outcome of board meeting" ||
+    desc === "board meeting" ||
+    desc === "committee meeting updates" ||
+    desc === "shareholders meeting" ||
+    desc === "amendment to aoa/moa" ||
+    desc.includes("esop") ||
+    desc.includes("esos") ||
+    desc.includes("esps") ||
+    desc.includes("appointment") ||
+    desc.includes("resignation") ||
+    desc.includes("change in director") ||
+    desc.includes("change in management") ||
+    desc.includes("change in registrar")
+  ) {
+    // Only rescue if announcement text confirms results
+    const hasResults =
+      ann.includes("financial results") ||
+      ann.includes("results for the") ||
+      ann.includes("unaudited") ||
+      ann.includes("audited financial")
+    if (!hasResults) return { bucket: "Other", magnitude: "low" }
+  }
+
+  // Bonus shares — not a financial result
+  if (desc === "bonus") return { bucket: "Other", magnitude: "low" }
+
+  // Insolvency — not a signal bucket
+  if (
+    desc.includes("insolvency") ||
+    desc.includes("resolution process") ||
+    desc.includes("liquidation")
+  ) return { bucket: "Other", magnitude: "low" }
+
+  // ── CONCALL & INVESTOR MEET ───────────────────────────────────────────────
   if (
     desc.includes("analysts/institutional") ||
     desc.includes("analyst meet") ||
@@ -71,33 +129,7 @@ function keywordClassify(
     desc.includes("analyst day")
   ) return { bucket: "Concall & Investor Meet", magnitude: "low" }
 
-  // ── 3. Clarifications — always noise ─────────────────────────────────────
-  if (
-    desc.includes("clarification") ||
-    desc.includes("clarification - financial") ||
-    desc.includes("clarification-financial") ||
-    ann.includes("clarification on financial results") ||
-    ann.includes("clarification to the financial results") ||
-    ann.includes("clarification on the financial results")
-  ) return { bucket: "Other", magnitude: "low" }
-
-  // ── 4. Board meeting without results — noise ──────────────────────────────
-  const isBoardOnly =
-    (desc === "outcome of board meeting" ||
-     desc === "board meeting" ||
-     desc.includes("appointment") ||
-     desc.includes("resignation") ||
-     desc.includes("change in director") ||
-     desc.includes("change in management") ||
-     desc.includes("change in registrar")) &&
-    !ann.includes("financial results") &&
-    !ann.includes("results for the") &&
-    !ann.includes("unaudited") &&
-    !ann.includes("audited financial")
-
-  if (isBoardOnly) return { bucket: "Other", magnitude: "low" }
-
-  // ── 5. Quarterly Results ──────────────────────────────────────────────────
+  // ── QUARTERLY RESULTS ─────────────────────────────────────────────────────
   const isResultsDesc =
     desc.includes("financial results") ||
     desc.includes("quarterly results") ||
@@ -107,7 +139,9 @@ function keywordClassify(
     desc.includes("standalone results") ||
     desc.includes("consolidated results") ||
     desc.includes("half yearly results") ||
-    desc.includes("half-yearly results")
+    desc.includes("half-yearly results") ||
+    desc.includes("integrated filing- financial") ||
+    desc.includes("integrated filing-financial")
 
   const isResultsAnn =
     ann.includes("financial results") ||
@@ -126,15 +160,15 @@ function keywordClassify(
     return { bucket: "Quarterly Results", magnitude: "medium" }
   }
 
-  // ── 6. Order Win ──────────────────────────────────────────────────────────
-  const isOrder =
+  // ── ORDER WIN ─────────────────────────────────────────────────────────────
+  if (
     desc.includes("bagging") ||
     desc.includes("receiving of order") ||
     desc.includes("receipt of order") ||
     desc.includes("new order") ||
     desc.includes("order win") ||
     desc.includes("letter of award") ||
-    desc.includes("loa") ||
+    desc === "loa" ||
     desc.includes("work order") ||
     desc.includes("contract award") ||
     desc.includes("secured order") ||
@@ -142,15 +176,13 @@ function keywordClassify(
     desc.includes("procurement order") ||
     ann.includes("bagging") ||
     ann.includes("letter of award") ||
-    ann.includes("work order") ||
+    ann.includes("work order awarded") ||
     ann.includes("order win") ||
-    ann.includes("new order") ||
     ann.includes("secured order")
+  ) return { bucket: "Order Win", magnitude: "high" }
 
-  if (isOrder) return { bucket: "Order Win", magnitude: "high" }
-
-  // ── 7. Capex Plan ─────────────────────────────────────────────────────────
-  const isCapex =
+  // ── CAPEX PLAN ────────────────────────────────────────────────────────────
+  if (
     desc.includes("capex") ||
     desc.includes("capital expenditure") ||
     desc.includes("greenfield") ||
@@ -160,26 +192,26 @@ function keywordClassify(
     desc.includes("new plant") ||
     desc.includes("new facility") ||
     desc.includes("new manufacturing") ||
-    desc.includes("setting up") ||
+    desc.includes("commencement of commercial production") ||
     ann.includes("capital expenditure") ||
     ann.includes("new plant") ||
     ann.includes("capacity expansion") ||
     ann.includes("greenfield") ||
     ann.includes("brownfield")
+  ) return { bucket: "Capex Plan", magnitude: "high" }
 
-  if (isCapex) return { bucket: "Capex Plan", magnitude: "high" }
-
-  // ── 8. Dividend ───────────────────────────────────────────────────────────
-  const isDividend =
-    desc.includes("dividend") ||
+  // ── DIVIDEND ──────────────────────────────────────────────────────────────
+  if (
+    desc === "dividend" ||
     desc.includes("interim dividend") ||
     desc.includes("final dividend") ||
     desc.includes("special dividend") ||
+    desc === "record date" ||
     ann.includes("interim dividend") ||
     ann.includes("final dividend") ||
-    ann.includes("special dividend")
-
-  if (isDividend) return { bucket: "Dividend", magnitude: "medium" }
+    ann.includes("special dividend") ||
+    ann.includes("declared dividend")
+  ) return { bucket: "Dividend", magnitude: "medium" }
 
   return { bucket: "Other", magnitude: "low" }
 }
@@ -192,21 +224,23 @@ async function classifyWithClaude(
 
   const prompt = `You are an expert Indian stock market analyst reviewing NSE corporate filings.
 
-Classify each filing into exactly one of these buckets:
+Classify each filing into exactly one bucket:
 
-- "Quarterly Results" → Company submitted financial results for any quarter or year. Look for: "financial results", "results for the period/quarter/year", "unaudited/audited results". NOTE: "Outcome of Board Meeting" often contains results — check announcement text. DO NOT classify clarifications as Quarterly Results.
-- "Order Win" → New contract, work order, letter of award, order receipt, bagging of orders
-- "Capex Plan" → Capital expenditure, new plant, capacity expansion, greenfield, brownfield
-- "Dividend" → Dividend declared, interim dividend, final dividend, special dividend
-- "Concall & Investor Meet" → Analyst meet, investor presentation, concall, conference call, earnings call, investor day
-- "Other" → Everything else: clarifications, press releases, newspaper publications, regulatory disclosures, general updates, AGM/EGM, appointments, resignations, credit ratings, address changes
+- "Quarterly Results" → Company submitted financial results for any quarter/year. "Outcome of Board Meeting" often contains results — check announcement text carefully.
+- "Order Win" → New contract, work order, letter of award, order receipt, bagging of orders. Must be explicitly stated.
+- "Capex Plan" → Capital expenditure, new plant, capacity expansion, greenfield, brownfield.
+- "Dividend" → Dividend declared, interim/final/special dividend, record date for dividend.
+- "Concall & Investor Meet" → Analyst meet, investor presentation, concall, conference call, earnings call.
+- "Other" → Everything else: clarifications, press releases, newspaper publications, regulatory filings, general updates, AGM/EGM, appointments, resignations, credit ratings, address changes, insolvency, bonus shares, corrigendum, delayed submission notices.
 
-RULES:
-1. "Clarification - Financial Results" → always "Other"
-2. "Copy of Newspaper Publication" → always "Other"
-3. "Outcome of Board Meeting" without results in announcement → "Other"
-4. Analyst meet / concall / investor presentation → "Concall & Investor Meet"
-5. Only classify as Order Win/Capex if explicitly stated
+STRICT RULES:
+1. "Clarification" in description → always "Other"
+2. "Reasons for Delayed/Non-submission" → always "Other"
+3. "Corrigendum" → always "Other"
+4. "Action(s) taken or orders passed" → always "Other" (board meeting, NOT order win)
+5. "Outcome of Board Meeting" without results in announcement → "Other"
+6. "Press Release" → only classify as signal bucket if announcement text explicitly confirms results/order/capex/dividend
+7. "Updates" or "General Updates" → only classify as signal if announcement text is very explicit
 
 Return ONLY valid JSON array, no markdown:
 [{"seq_id":"...","bucket":"...","ai_summary":"one line max 15 words specific to this filing","magnitude":"high|medium|low"}]
