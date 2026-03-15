@@ -366,7 +366,12 @@ export default function Home() {
               <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>
                 {formatDateShort(lastUpdated.toISOString())}
               </span>
+          
             )}
+             <a href="/company"
+  style={{ fontSize: 11, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, textDecoration: "none", padding: "4px 10px", borderRadius: 6, border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}` }}>
+  COMPANY SEARCH
+</a>
             <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
             <button onClick={() => { fetchCounts(activeSegment); fetchData(activeBucket, activeSegment, true) }}
               style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${headerBorder}`, borderRadius: 8, padding: "6px 14px", color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)", fontSize: 11, cursor: "pointer", fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 6, letterSpacing: 0.3 }}>
