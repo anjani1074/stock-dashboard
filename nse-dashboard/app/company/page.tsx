@@ -21,12 +21,26 @@ interface Company {
   Company_name: string
 }
 
+interface MarketData {
+  symbol: string
+  market_cap: number
+  cmp: number
+  pe_ratio: number
+  sector: string
+}
+
 const BUCKET_CONFIG: Record<string, { icon: string; color: string; darkColor: string; label: string }> = {
   "Quarterly Results": { icon: "▣", color: "#10b981", darkColor: "#34d399", label: "Quarterly Results" },
   "Order Win":         { icon: "◈", color: "#3b82f6", darkColor: "#60a5fa", label: "Order Book" },
   "Capex Plan":        { icon: "⬡", color: "#f59e0b", darkColor: "#fbbf24", label: "Capex Plan" },
   "Dividend":          { icon: "◎", color: "#8b5cf6", darkColor: "#a78bfa", label: "Dividend" },
-  "Press Release":     { icon: "◉", color: "#6b7280", darkColor: "#9ca3af", label: "Press Release" },
+}
+
+function formatMarketCap(mcap: number | null | undefined): string {
+  if (!mcap || mcap <= 0) return "—"
+  if (mcap >= 100000) return `₹${(mcap / 100000).toFixed(1)}L Cr`
+  if (mcap >= 1000)   return `₹${Math.round(mcap).toLocaleString("en-IN")} Cr`
+  return `₹${mcap.toFixed(0)} Cr`
 }
 
 function formatDate(d: string | null) {
@@ -56,7 +70,6 @@ function FilingRow({ item, isDark }: { item: Announcement; isDark: boolean }) {
   const bColor   = isDark ? cfg.darkColor : cfg.color
   const mainText = item.ai_summary || item.description
   const isAI     = !!item.ai_summary
-
   const cardBg     = isDark ? (expanded ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)") : (expanded ? "rgba(0,0,0,0.03)" : "#ffffff")
   const cardBorder = isDark ? (expanded ? `${bColor}40` : "rgba(255,255,255,0.08)") : (expanded ? `${bColor}55` : "rgba(0,0,0,0.08)")
   const metaColor  = isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.35)"
@@ -67,19 +80,14 @@ function FilingRow({ item, isDark }: { item: Announcement; isDark: boolean }) {
       style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", transition: "all 0.15s ease", position: "relative", overflow: "hidden" }}
     >
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: bColor, borderRadius: "10px 0 0 10px", opacity: expanded ? 1 : 0.5 }} />
-
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12, paddingLeft: 6 }}>
-        {/* Bucket badge */}
         <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, minWidth: 70 }}>
           <span style={{ fontSize: 14, color: bColor }}>{cfg.icon}</span>
-          <span style={{ fontSize: 8, fontFamily: "'IBM Plex Mono', monospace", color: bColor, letterSpacing: 0.5, fontWeight: 700, textAlign: "center", lineHeight: 1.2 }}>
+          <span style={{ fontSize: 8, fontFamily: "'IBM Plex Mono', monospace", color: bColor, letterSpacing: 0.5, fontWeight: 700, textAlign: "center", lineHeight: 1.2, whiteSpace: "pre-line" }}>
             {cfg.label.toUpperCase().replace(" ", "\n")}
           </span>
         </div>
-
         <div style={{ width: 1, alignSelf: "stretch", background: divColor, flexShrink: 0 }} />
-
-        {/* Content */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 5, marginBottom: 3 }}>
             {isAI && (
@@ -91,15 +99,11 @@ function FilingRow({ item, isDark }: { item: Announcement; isDark: boolean }) {
           </div>
           <div style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>
             {formatDateShort(item.filing_time)} · {item.segment === "sme" ? "SME" : "NSE"}
-            {item.magnitude === "high" && (
-              <span style={{ marginLeft: 8, color: bColor, fontWeight: 700 }}>HIGH IMPACT</span>
-            )}
+            {item.magnitude === "high" && <span style={{ marginLeft: 8, color: bColor, fontWeight: 700 }}>HIGH IMPACT</span>}
           </div>
         </div>
-
         <span style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0, transition: "transform 0.15s", transform: expanded ? "rotate(180deg)" : "none", display: "inline-block" }}>▼</span>
       </div>
-
       {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${divColor}`, paddingLeft: 6, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
           <div>
@@ -120,20 +124,28 @@ function FilingRow({ item, isDark }: { item: Announcement; isDark: boolean }) {
 }
 
 export default function CompanyPage() {
-  const [query, setQuery]             = useState("")
-  const [filings, setFilings]         = useState<Announcement[]>([])
-  const [companies, setCompanies]     = useState<Company[]>([])
-  const [loading, setLoading]         = useState(false)
-  const [searched, setSearched]       = useState(false)
+  const [query, setQuery]              = useState("")
+  const [filings, setFilings]          = useState<Announcement[]>([])
+  const [companies, setCompanies]      = useState<Company[]>([])
+  const [marketData, setMarketData]    = useState<MarketData | null>(null)
+  const [loading, setLoading]          = useState(false)
+  const [searched, setSearched]        = useState(false)
   const [selectedCompany, setSelected] = useState<Company | null>(null)
-  const [showDropdown, setDropdown]   = useState(false)
-  const [isDark, setIsDark]           = useState(true)
-  const debounceRef                   = useRef<NodeJS.Timeout | null>(null)
-  const inputRef                      = useRef<HTMLInputElement>(null)
+  const [showDropdown, setDropdown]    = useState(false)
+  const [isDark, setIsDark]            = useState(true)
+  const debounceRef                    = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem("theme")
     if (saved) setIsDark(saved === "dark")
+  }, [])
+
+  const fetchMarketData = useCallback(async (symbol: string) => {
+    try {
+      const res  = await fetch(`/api/market-data?symbols=${symbol}`)
+      const data = await res.json()
+      if (data[symbol]) setMarketData(data[symbol])
+    } catch (e) { console.error(e) }
   }, [])
 
   const search = useCallback(async (q: string) => {
@@ -152,6 +164,7 @@ export default function CompanyPage() {
   function handleInput(val: string) {
     setQuery(val)
     setSelected(null)
+    setMarketData(null)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => search(val), 400)
   }
@@ -161,9 +174,9 @@ export default function CompanyPage() {
     setQuery(company.Company_name)
     setDropdown(false)
     search(company.symbol)
+    fetchMarketData(company.symbol)
   }
 
-  // Group filings by bucket
   const grouped = filings.reduce((acc, f) => {
     const key = f.bucket || "Other"
     if (!acc[key]) acc[key] = []
@@ -171,8 +184,8 @@ export default function CompanyPage() {
     return acc
   }, {} as Record<string, Announcement[]>)
 
-  const bucketOrder = ["Quarterly Results", "Order Win", "Capex Plan", "Dividend"]
-  const sortedBuckets = [
+  const bucketOrder    = ["Quarterly Results", "Order Win", "Capex Plan", "Dividend"]
+  const sortedBuckets  = [
     ...bucketOrder.filter((b) => grouped[b]?.length > 0),
     ...Object.keys(grouped).filter((b) => !bucketOrder.includes(b) && grouped[b]?.length > 0),
   ]
@@ -180,7 +193,6 @@ export default function CompanyPage() {
   const companyName = selectedCompany?.Company_name || (filings[0]?.Company_name ?? "")
   const symbol      = selectedCompany?.symbol || (filings[0]?.symbol ?? "")
 
-  // Theme
   const bg           = isDark ? "#0a0d12"                : "#f8fafc"
   const headerBg     = isDark ? "rgba(10,13,18,0.92)"   : "rgba(248,250,252,0.92)"
   const headerBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)"
@@ -192,6 +204,8 @@ export default function CompanyPage() {
   const dropBorder   = isDark ? "rgba(255,255,255,0.1)"  : "rgba(0,0,0,0.1)"
   const footerColor  = isDark ? "rgba(255,255,255,0.2)"  : "rgba(0,0,0,0.25)"
   const footerBorder = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.07)"
+  const metaCardBg   = isDark ? "rgba(255,255,255,0.03)" : "#ffffff"
+  const metaCardBorder = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"
 
   return (
     <>
@@ -211,9 +225,7 @@ export default function CompanyPage() {
 
       <div style={{ minHeight: "100vh", background: bg, color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
 
-        {isDark && (
-          <div style={{ position: "fixed", top: -100, left: -100, width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(16,185,129,0.04) 0%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
-        )}
+        {isDark && <div style={{ position: "fixed", top: -100, left: -100, width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(16,185,129,0.04) 0%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />}
 
         {/* HEADER */}
         <header style={{ position: "sticky", top: 0, zIndex: 100, borderBottom: `1px solid ${headerBorder}`, background: headerBg, backdropFilter: "blur(24px)" }}>
@@ -224,8 +236,7 @@ export default function CompanyPage() {
             </a>
             <div style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace" }}>/ COMPANY SEARCH</div>
             <div style={{ flex: 1 }} />
-            <button
-              onClick={() => { const next = !isDark; setIsDark(next); localStorage.setItem("theme", next ? "dark" : "light") }}
+            <button onClick={() => { const next = !isDark; setIsDark(next); localStorage.setItem("theme", next ? "dark" : "light") }}
               style={{ background: "none", border: `1px solid ${isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.12)"}`, borderRadius: 8, padding: "6px 12px", cursor: "pointer", color: subColor, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>
               {isDark ? "☀ LIGHT" : "☽ DARK"}
             </button>
@@ -246,7 +257,7 @@ export default function CompanyPage() {
 
           {/* SEARCH BOX */}
           <div style={{ position: "relative", marginBottom: 40, animation: "fadeUp 0.3s 0.05s both" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, background: inputBg, border: `1px solid ${inputBorder}`, borderRadius: 12, padding: "14px 20px", boxShadow: isDark ? "0 0 0 0 transparent" : "0 2px 8px rgba(0,0,0,0.06)", transition: "border-color 0.15s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, background: inputBg, border: `1px solid ${inputBorder}`, borderRadius: 12, padding: "14px 20px", boxShadow: isDark ? "none" : "0 2px 8px rgba(0,0,0,0.06)" }}>
               {loading ? (
                 <div style={{ width: 16, height: 16, borderTop: "2px solid #10b981", borderRight: "2px solid transparent", borderBottom: "2px solid transparent", borderLeft: "2px solid transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
               ) : (
@@ -255,7 +266,6 @@ export default function CompanyPage() {
                 </svg>
               )}
               <input
-                ref={inputRef}
                 value={query}
                 onChange={(e) => handleInput(e.target.value)}
                 onFocus={() => companies.length > 0 && setDropdown(true)}
@@ -264,12 +274,12 @@ export default function CompanyPage() {
                 style={{ background: "none", border: "none", outline: "none", color: isDark ? "#f1f5f9" : "#0f172a", fontSize: 15, width: "100%", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
               />
               {query && (
-                <button onClick={() => { setQuery(""); setFilings([]); setCompanies([]); setSearched(false); setSelected(null) }}
+                <button onClick={() => { setQuery(""); setFilings([]); setCompanies([]); setSearched(false); setSelected(null); setMarketData(null) }}
                   style={{ background: "none", border: "none", color: subColor, cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
               )}
             </div>
 
-            {/* AUTOCOMPLETE DROPDOWN */}
+            {/* AUTOCOMPLETE */}
             {showDropdown && companies.length > 0 && (
               <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: dropBg, border: `1px solid ${dropBorder}`, borderRadius: 10, overflow: "hidden", boxShadow: isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50 }}>
                 {companies.map((c) => (
@@ -284,75 +294,111 @@ export default function CompanyPage() {
             )}
           </div>
 
-          {/* RESULTS */}
+          {/* EMPTY STATE */}
           {!searched && !loading && (
             <div style={{ textAlign: "center", padding: "40px 0", animation: "fadeUp 0.3s 0.1s both" }}>
               <div style={{ fontSize: 32, marginBottom: 16, opacity: 0.3 }}>◈</div>
-              <div style={{ fontSize: 13, color: subColor, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>
-                Search for any NSE listed company
-              </div>
-              <div style={{ fontSize: 11, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, opacity: 0.7 }}>
-                QUARTERLY RESULTS · ORDER WINS · CAPEX · DIVIDENDS
-              </div>
+              <div style={{ fontSize: 13, color: subColor, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 8 }}>Search for any NSE listed company</div>
+              <div style={{ fontSize: 11, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, opacity: 0.7 }}>QUARTERLY RESULTS · ORDER WINS · CAPEX · DIVIDENDS</div>
             </div>
           )}
 
           {searched && filings.length === 0 && !loading && (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
               <div style={{ fontSize: 28, marginBottom: 12, opacity: 0.3 }}>◇</div>
-              <div style={{ fontSize: 13, color: subColor, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                No signal filings found for "{query}"
-              </div>
-              <div style={{ fontSize: 11, color: subColor, marginTop: 6, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>
-                Try searching by stock symbol e.g. DIXON, CDSL
-              </div>
+              <div style={{ fontSize: 13, color: subColor, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>No signal filings found for "{query}"</div>
+              <div style={{ fontSize: 11, color: subColor, marginTop: 6, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>Try the stock symbol e.g. DIXON, CDSL</div>
             </div>
           )}
 
+          {/* RESULTS */}
           {searched && filings.length > 0 && (
             <div style={{ animation: "fadeUp 0.3s both" }}>
 
               {/* COMPANY HEADER */}
-              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28, padding: "18px 22px", background: isDark ? "rgba(255,255,255,0.03)" : "#ffffff", border: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"}`, borderRadius: 14, boxShadow: isDark ? "none" : "0 1px 4px rgba(0,0,0,0.05)" }}>
-                <div style={{ width: 44, height: 44, background: "linear-gradient(135deg, #10b981, #3b82f6)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#fff", fontWeight: 900, flexShrink: 0 }}>
-                  {symbol.slice(0, 2)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: titleColor, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: -0.3, marginBottom: 3 }}>
-                    {companyName}
+              <div style={{ marginBottom: 24, padding: "20px 24px", background: metaCardBg, border: `1px solid ${metaCardBorder}`, borderRadius: 14, boxShadow: isDark ? "none" : "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+                  {/* Logo */}
+                  <div style={{ width: 44, height: 44, background: "linear-gradient(135deg, #10b981, #3b82f6)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#fff", fontWeight: 900, flexShrink: 0 }}>
+                    {symbol.slice(0, 2)}
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: "#10b981", fontWeight: 700, letterSpacing: 0.5 }}>{symbol}</span>
-                    <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace" }}>·</span>
-                    <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>{filings.length} FILINGS · JAN 2026 → TODAY</span>
+
+                  {/* Name + symbol */}
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: titleColor, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: -0.3, marginBottom: 4 }}>
+                      {companyName}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: "#10b981", fontWeight: 700, letterSpacing: 0.5 }}>{symbol}</span>
+                      <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace" }}>·</span>
+                      <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>{filings.length} FILINGS · JAN 2026 → TODAY</span>
+                      {marketData?.sector && (
+                        <>
+                          <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace" }}>·</span>
+                          <span style={{ fontSize: 10, color: subColor, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{marketData.sector}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Market data */}
+                  {marketData && (
+                    <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                      {marketData.market_cap > 0 && (
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 8, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.8, marginBottom: 3 }}>Mkt Cap</div>
+                          <div style={{ fontSize: 15, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: titleColor, letterSpacing: -0.5 }}>
+                            {formatMarketCap(marketData.market_cap)}
+                          </div>
+                        </div>
+                      )}
+                      {marketData.cmp > 0 && (
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 8, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.8, marginBottom: 3 }}>CMP</div>
+                          <div style={{ fontSize: 15, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: titleColor, letterSpacing: -0.5 }}>
+                            ₹{marketData.cmp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      )}
+                      {marketData.pe_ratio > 0 && (
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 8, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.8, marginBottom: 3 }}>P/E</div>
+                          <div style={{ fontSize: 15, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: titleColor, letterSpacing: -0.5 }}>
+                            {marketData.pe_ratio.toFixed(1)}x
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Bucket summary pills */}
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {sortedBuckets.map((bucket) => {
-                    const cfg = BUCKET_CONFIG[bucket]
-                    if (!cfg) return null
-                    const bc = isDark ? cfg.darkColor : cfg.color
-                    return (
-                      <div key={bucket} style={{ display: "flex", alignItems: "center", gap: 4, background: `${bc}15`, border: `1px solid ${bc}30`, borderRadius: 6, padding: "4px 10px" }}>
-                        <span style={{ fontSize: 11, color: bc }}>{cfg.icon}</span>
-                        <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", color: bc, fontWeight: 700, letterSpacing: 0.3 }}>{grouped[bucket].length}</span>
-                      </div>
-                    )
-                  })}
-                </div>
+                {sortedBuckets.length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 14, paddingTop: 14, borderTop: `1px solid ${isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)"}` }}>
+                    {sortedBuckets.map((bucket) => {
+                      const cfg = BUCKET_CONFIG[bucket]
+                      if (!cfg) return null
+                      const bc = isDark ? cfg.darkColor : cfg.color
+                      return (
+                        <div key={bucket} style={{ display: "flex", alignItems: "center", gap: 5, background: `${bc}12`, border: `1px solid ${bc}28`, borderRadius: 6, padding: "4px 10px" }}>
+                          <span style={{ fontSize: 11, color: bc }}>{cfg.icon}</span>
+                          <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", color: bc, fontWeight: 700, letterSpacing: 0.3 }}>{cfg.label}</span>
+                          <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", color: bc, opacity: 0.7 }}>({grouped[bucket].length})</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* GROUPED FILINGS */}
               {sortedBuckets.map((bucket) => {
-                const cfg    = BUCKET_CONFIG[bucket]
-                const items  = grouped[bucket]
+                const cfg   = BUCKET_CONFIG[bucket]
+                const items = grouped[bucket]
                 if (!items?.length) return null
                 const bc = cfg ? (isDark ? cfg.darkColor : cfg.color) : "#6b7280"
                 return (
                   <div key={bucket} style={{ marginBottom: 28 }}>
-                    {/* Section header */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                       <span style={{ fontSize: 14, color: bc }}>{cfg?.icon}</span>
                       <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: bc, fontWeight: 700, letterSpacing: 0.8 }}>
@@ -361,7 +407,6 @@ export default function CompanyPage() {
                       <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace" }}>({items.length})</span>
                       <div style={{ flex: 1, height: 1, background: `${bc}25` }} />
                     </div>
-
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {items.map((item) => (
                         <div key={item.id} className="filing-row" style={{ borderRadius: 10 }}>
@@ -377,12 +422,8 @@ export default function CompanyPage() {
 
           {/* Footer */}
           <div style={{ marginTop: 48, paddingTop: 18, borderTop: `1px solid ${footerBorder}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-            <span style={{ fontSize: 10, color: footerColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>
-              DATA: NSE INDIA · AI: CLAUDE · JAN 2026 → PRESENT
-            </span>
-            <span style={{ fontSize: 10, color: footerColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>
-              NOT SEBI REGISTERED · NOT INVESTMENT ADVICE
-            </span>
+            <span style={{ fontSize: 10, color: footerColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>DATA: NSE INDIA · AI: CLAUDE · JAN 2026 → PRESENT</span>
+            <span style={{ fontSize: 10, color: footerColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>NOT SEBI REGISTERED · NOT INVESTMENT ADVICE</span>
           </div>
         </main>
       </div>

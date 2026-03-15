@@ -16,6 +16,14 @@ interface Announcement {
   segment: string | null
 }
 
+interface MarketData {
+  symbol: string
+  market_cap: number
+  cmp: number
+  pe_ratio: number
+  sector: string
+}
+
 const BUCKETS = [
   { id: "Quarterly Results", label: "Quarterly Results", shortLabel: "Q RESULTS",  icon: "▣", color: "#10b981", darkColor: "#34d399", border: "rgba(16,185,129,0.3)",  darkBorder: "rgba(52,211,153,0.25)",  bg: "rgba(16,185,129,0.07)",  darkBg: "rgba(52,211,153,0.06)",  description: "Q3 FY26 financial results" },
   { id: "Order Win",         label: "Order Book",        shortLabel: "ORDERS",      icon: "◈", color: "#3b82f6", darkColor: "#60a5fa", border: "rgba(59,130,246,0.3)",  darkBorder: "rgba(96,165,250,0.25)",  bg: "rgba(59,130,246,0.07)",  darkBg: "rgba(96,165,250,0.06)",  description: "New contracts & LOAs" },
@@ -29,6 +37,14 @@ const SEGMENTS = [
   { id: "equities", label: "Main Board", sublabel: "NSE Equities" },
   { id: "sme",      label: "SME Emerge", sublabel: "NSE Emerge" },
 ]
+
+// ─── Market cap formatter ─────────────────────────────────────────────────────
+function formatMarketCap(mcap: number | null | undefined): string {
+  if (!mcap || mcap <= 0) return ""
+  if (mcap >= 100000) return `₹${(mcap / 100000).toFixed(1)}L Cr`
+  if (mcap >= 1000)   return `₹${Math.round(mcap).toLocaleString("en-IN")} Cr`
+  return `₹${mcap.toFixed(0)} Cr`
+}
 
 function formatDate(d: string | null) {
   if (!d) return "—"
@@ -60,7 +76,13 @@ function MagnitudeBadge({ magnitude, color }: { magnitude: string | null; color:
   )
 }
 
-function FilingCard({ item, bucket, isDark, index }: { item: Announcement; bucket: typeof BUCKETS[0] | undefined; isDark: boolean; index: number }) {
+function FilingCard({ item, bucket, isDark, index, marketData }: {
+  item: Announcement
+  bucket: typeof BUCKETS[0] | undefined
+  isDark: boolean
+  index: number
+  marketData: MarketData | null
+}) {
   const [expanded, setExpanded] = useState(false)
   const bColor     = bucket ? (isDark ? bucket.darkColor : bucket.color) : "#6b7280"
   const mainText   = item.ai_summary || item.description
@@ -71,18 +93,30 @@ function FilingCard({ item, bucket, isDark, index }: { item: Announcement; bucke
   const metaColor  = isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.35)"
   const summaryColor = isDark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.68)"
   const divColor   = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)"
+  const mcap       = formatMarketCap(marketData?.market_cap)
 
   return (
     <div onClick={() => setExpanded(!expanded)}
       style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 10, padding: "14px 18px", cursor: "pointer", transition: "all 0.15s ease", animation: `fadeUp 0.3s ${Math.min(index * 0.02, 0.25)}s both`, position: "relative", overflow: "hidden" }}
     >
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: bColor, borderRadius: "10px 0 0 10px", opacity: expanded ? 1 : 0.4, transition: "opacity 0.15s" }} />
+
       <div style={{ display: "flex", alignItems: "flex-start", gap: 14, paddingLeft: 6 }}>
-        <div style={{ flexShrink: 0, minWidth: 80 }}>
+        {/* Symbol + market cap */}
+        <div style={{ flexShrink: 0, minWidth: 90 }}>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700, color: bColor, letterSpacing: 0.5, marginBottom: 3 }}>{item.symbol}</div>
-          <div style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>{formatDateShort(item.filing_time)}</div>
+          <div style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3, marginBottom: 2 }}>{formatDateShort(item.filing_time)}</div>
+          {mcap && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 4 }}>
+              <span style={{ fontSize: 8, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>Mkt Cap</span>
+              <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)", fontWeight: 600, letterSpacing: 0.2 }}>{mcap}</span>
+            </div>
+          )}
         </div>
+
         <div style={{ width: 1, alignSelf: "stretch", background: divColor, flexShrink: 0 }} />
+
+        {/* Content */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: nameColor, lineHeight: 1.3, marginBottom: 5, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: -0.1 }}>
             {item.Company_name}
@@ -96,13 +130,45 @@ function FilingCard({ item, bucket, isDark, index }: { item: Announcement; bucke
             </div>
           </div>
         </div>
+
+        {/* Right */}
         <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
           <MagnitudeBadge magnitude={item.magnitude} color={bColor} />
           <span style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", transition: "transform 0.15s", transform: expanded ? "rotate(180deg)" : "rotate(0deg)", display: "inline-block" }}>▼</span>
         </div>
       </div>
+
       {expanded && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${divColor}`, paddingLeft: 6 }}>
+          {/* Market data row */}
+          {marketData && (marketData.cmp > 0 || marketData.pe_ratio > 0) && (
+            <div style={{ display: "flex", gap: 20, marginBottom: 10, padding: "8px 12px", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", borderRadius: 7 }}>
+              {marketData.cmp > 0 && (
+                <div>
+                  <div style={{ fontSize: 8, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, marginBottom: 2 }}>CMP</div>
+                  <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: isDark ? "#f1f5f9" : "#0f172a" }}>
+                    ₹{marketData.cmp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
+              {marketData.pe_ratio > 0 && (
+                <div>
+                  <div style={{ fontSize: 8, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, marginBottom: 2 }}>P/E</div>
+                  <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: isDark ? "#f1f5f9" : "#0f172a" }}>
+                    {marketData.pe_ratio.toFixed(1)}x
+                  </div>
+                </div>
+              )}
+              {marketData.sector && (
+                <div>
+                  <div style={{ fontSize: 8, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, marginBottom: 2 }}>SECTOR</div>
+                  <div style={{ fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif", color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)" }}>
+                    {marketData.sector}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
             <div>
               <div style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.8, marginBottom: 4 }}>NSE FILING TYPE</div>
@@ -132,29 +198,27 @@ function ThemeToggle({ isDark, onToggle }: { isDark: boolean; onToggle: () => vo
 }
 
 export default function Home() {
-  const [announcements, setAnnouncements]    = useState<Announcement[]>([])
-  const [pendingAnnouncements, setPending]   = useState<Announcement[]>([])
-  const [bucketCounts, setBucketCounts]      = useState<Record<string, number>>({})
-  const [loading, setLoading]                = useState(true)
-  const [activeBucket, setActiveBucket]      = useState<string | null>(null)
-  const [activeSegment, setActiveSegment]    = useState<"equities" | "sme">("equities")
-  const [search, setSearch]                  = useState("")
-  const [lastUpdated, setLastUpdated]        = useState<Date | null>(null)
-  const [refreshing, setRefreshing]          = useState(false)
-  const [isDark, setIsDark]                  = useState(true)
+  const [announcements, setAnnouncements]     = useState<Announcement[]>([])
+  const [pendingAnnouncements, setPending]    = useState<Announcement[]>([])
+  const [bucketCounts, setBucketCounts]       = useState<Record<string, number>>({})
+  const [marketDataMap, setMarketDataMap]     = useState<Record<string, MarketData>>({})
+  const [loading, setLoading]                 = useState(true)
+  const [activeBucket, setActiveBucket]       = useState<string | null>(null)
+  const [activeSegment, setActiveSegment]     = useState<"equities" | "sme">("equities")
+  const [search, setSearch]                   = useState("")
+  const [lastUpdated, setLastUpdated]         = useState<Date | null>(null)
+  const [refreshing, setRefreshing]           = useState(false)
+  const [isDark, setIsDark]                   = useState(true)
   const [newFilingsCount, setNewFilingsCount] = useState(0)
 
-  // Refs to track current values for background fetch
-  const currentSegmentRef  = useRef<"equities" | "sme">("equities")
-  const currentBucketRef   = useRef<string | null>(null)
-  const isFirstRender      = useRef(true)
-  const initialLoadDone    = useRef(false)
+  const currentSegmentRef = useRef<"equities" | "sme">("equities")
+  const currentBucketRef  = useRef<string | null>(null)
+  const isFirstRender     = useRef(true)
+  const initialLoadDone   = useRef(false)
 
-  // Keep refs in sync with state
   useEffect(() => { currentSegmentRef.current = activeSegment }, [activeSegment])
   useEffect(() => { currentBucketRef.current  = activeBucket  }, [activeBucket])
 
-  // Theme
   useEffect(() => {
     const saved = localStorage.getItem("theme")
     if (saved) setIsDark(saved === "dark")
@@ -166,6 +230,19 @@ export default function Home() {
     localStorage.setItem("theme", next ? "dark" : "light")
   }
 
+  // Fetch market data for a list of symbols
+  const fetchMarketData = useCallback(async (filings: Announcement[]) => {
+    const symbols = [...new Set(filings.map((f) => f.symbol))].slice(0, 50)
+    if (symbols.length === 0) return
+    try {
+      const res  = await fetch(`/api/market-data?symbols=${symbols.join(",")}`)
+      const data = await res.json()
+      if (data && !data.error) {
+        setMarketDataMap((prev) => ({ ...prev, ...data }))
+      }
+    } catch (e) { console.error(e) }
+  }, [])
+
   const fetchCounts = useCallback(async (segment: string) => {
     try {
       const res    = await fetch(`/api/announcements?countOnly=true&segment=${segment}`)
@@ -174,15 +251,10 @@ export default function Home() {
     } catch (e) { console.error(e) }
   }, [])
 
-  // Full replace fetch — used on initial load and manual tab switches
-  const fetchData = useCallback(async (
-    bucket: string | null,
-    segment: string,
-    showRefresh = false
-  ) => {
+  const fetchData = useCallback(async (bucket: string | null, segment: string, showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
     setLoading(true)
-    setAnnouncements([])   // clear immediately — prevents mixing
+    setAnnouncements([])
     setPending([])
     setNewFilingsCount(0)
     try {
@@ -193,16 +265,12 @@ export default function Home() {
       if (Array.isArray(data)) {
         setAnnouncements(data)
         setLastUpdated(new Date())
+        fetchMarketData(data) // fetch market data in parallel
       }
     } catch (e) { console.error(e) }
-    finally {
-      setLoading(false)
-      setRefreshing(false)
-      initialLoadDone.current = true
-    }
-  }, [])
+    finally { setLoading(false); setRefreshing(false); initialLoadDone.current = true }
+  }, [fetchMarketData])
 
-  // Background fetch — silent, no scroll disruption
   const fetchBackground = useCallback(async () => {
     if (!initialLoadDone.current) return
     try {
@@ -213,57 +281,39 @@ export default function Home() {
       const res  = await fetch(url)
       const data = await res.json()
       if (!Array.isArray(data)) return
-
-      fetchCounts(segment) // update counts silently
-
-      // Compare — only show banner if genuinely new filings
+      fetchCounts(segment)
       setAnnouncements((current) => {
         const currentIds = new Set(current.map((a) => a.id))
         const newOnes    = data.filter((a: Announcement) => !currentIds.has(a.id))
-        if (newOnes.length > 0) {
-          setPending(data)
-          setNewFilingsCount(newOnes.length)
-        }
-        return current // don't disrupt user
+        if (newOnes.length > 0) { setPending(data); setNewFilingsCount(newOnes.length) }
+        return current
       })
     } catch (e) { console.error(e) }
   }, [fetchCounts])
 
-  // Apply pending when user clicks banner
   function applyPendingUpdates() {
     setAnnouncements(pendingAnnouncements)
+    fetchMarketData(pendingAnnouncements)
     setPending([])
     setNewFilingsCount(0)
     setLastUpdated(new Date())
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  // ── SINGLE MOUNT EFFECT — reads URL first, then fetches ──────────────────
-  // This guarantees correct segment/bucket before any fetch happens
+  // Single mount effect — reads URL first
   useEffect(() => {
     const params  = new URLSearchParams(window.location.search)
     const bucket  = params.get("bucket")
     const segment = (params.get("segment") as "equities" | "sme") || "equities"
-
-    // Set state
-    if (bucket && SIGNAL_BUCKETS.includes(bucket)) {
-      setActiveBucket(bucket)
-      currentBucketRef.current = bucket
-    }
-    setActiveSegment(segment)
-    currentSegmentRef.current = segment
-
-    // Fetch with correct values immediately — don't wait for state
+    if (bucket && SIGNAL_BUCKETS.includes(bucket)) { setActiveBucket(bucket); currentBucketRef.current = bucket }
+    setActiveSegment(segment); currentSegmentRef.current = segment
     fetchCounts(segment)
     fetchData(bucket && SIGNAL_BUCKETS.includes(bucket) ? bucket : null, segment)
   }, []) // eslint-disable-line
 
-  // ── User-initiated tab/bucket switch — skip first render ─────────────────
+  // User-initiated tab/bucket switch
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false
-      return
-    }
+    if (isFirstRender.current) { isFirstRender.current = false; return }
     fetchCounts(activeSegment)
     fetchData(activeBucket, activeSegment)
   }, [activeSegment, activeBucket]) // eslint-disable-line
@@ -303,7 +353,6 @@ export default function Home() {
 
   const totalSignal = Object.values(bucketCounts).reduce((a, b) => a + b, 0)
 
-  // Theme values
   const bg           = isDark ? "#0a0d12"                : "#f8fafc"
   const headerBg     = isDark ? "rgba(10,13,18,0.92)"   : "rgba(248,250,252,0.92)"
   const headerBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)"
@@ -325,8 +374,8 @@ export default function Home() {
         ::-webkit-scrollbar-thumb { background: ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)"}; border-radius: 2px; }
         @keyframes fadeUp   { from { opacity:0; transform:translateY(8px);  } to { opacity:1; transform:translateY(0); } }
         @keyframes fadeDown { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes spin   { to { transform: rotate(360deg); } }
-        @keyframes pulse  { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+        @keyframes spin  { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
         .bucket-card:hover { transform: translateY(-2px); }
         .filing-row:hover { background: ${isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.02)"} !important; border-color: ${isDark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.14)"} !important; }
         .seg-tab:hover { opacity: 0.85; }
@@ -366,12 +415,11 @@ export default function Home() {
               <span style={{ fontSize: 10, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.3 }}>
                 {formatDateShort(lastUpdated.toISOString())}
               </span>
-          
             )}
-             <a href="/company"
-  style={{ fontSize: 11, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, textDecoration: "none", padding: "4px 10px", borderRadius: 6, border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}` }}>
-  COMPANY SEARCH
-</a>
+            <a href="/company"
+              style={{ fontSize: 11, color: subColor, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5, textDecoration: "none", padding: "4px 10px", borderRadius: 6, border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}` }}>
+              COMPANY SEARCH
+            </a>
             <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
             <button onClick={() => { fetchCounts(activeSegment); fetchData(activeBucket, activeSegment, true) }}
               style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${headerBorder}`, borderRadius: 8, padding: "6px 14px", color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)", fontSize: 11, cursor: "pointer", fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 6, letterSpacing: 0.3 }}>
@@ -384,7 +432,6 @@ export default function Home() {
         <main style={{ maxWidth: 1280, margin: "0 auto", padding: "32px 28px 80px", position: "relative", zIndex: 1 }}>
 
           {isBucketView && activeBucketObj ? (
-            // BUCKET VIEW
             <div style={{ marginBottom: 28, animation: "fadeUp 0.3s both" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
                 <span style={{ fontSize: 18, color: bColor }}>{activeBucketObj.icon}</span>
@@ -402,7 +449,6 @@ export default function Home() {
               </p>
             </div>
           ) : (
-            // MAIN DASHBOARD
             <>
               <div style={{ marginBottom: 24, animation: "fadeUp 0.3s both" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}>
@@ -510,7 +556,13 @@ export default function Home() {
                 const bucket = BUCKETS.find((b) => b.id === item.bucket)
                 return (
                   <div key={item.id} className="filing-row" style={{ borderRadius: 10 }}>
-                    <FilingCard item={item} bucket={bucket} isDark={isDark} index={i} />
+                    <FilingCard
+                      item={item}
+                      bucket={bucket}
+                      isDark={isDark}
+                      index={i}
+                      marketData={marketDataMap[item.symbol] || null}
+                    />
                   </div>
                 )
               })}
