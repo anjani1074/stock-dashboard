@@ -49,36 +49,35 @@ function keywordClassify(
   const desc = description.toLowerCase().trim()
   const ann  = (announcement || "").toLowerCase()
 
-  // ── BLOCK LIST — always Other, check first ────────────────────────────────
-
-  // Newspaper publications
+  // ── BLOCK LIST ────────────────────────────────────────────────────────────
   if (
     desc.includes("copy of newspaper") ||
     desc.includes("newspaper publication") ||
     desc.includes("copy of the newspaper")
   ) return { bucket: "Other", magnitude: "low" }
 
-  // Clarifications about results — not actual results
   if (
     desc.includes("clarification") ||
     desc.includes("clarification - financial") ||
     desc.includes("clarification-financial")
   ) return { bucket: "Other", magnitude: "low" }
 
-  // Delayed/non-submission notices — not actual results
   if (
     desc.includes("reasons for delayed") ||
     desc.includes("non-submission of financial") ||
     desc.includes("delayed submission")
   ) return { bucket: "Other", magnitude: "low" }
 
-  // Corrigendum — correction notice, not results
   if (desc.includes("corrigendum")) return { bucket: "Other", magnitude: "low" }
-
-  // Incorporation — new company registration, not capex
   if (desc === "incorporation") return { bucket: "Other", magnitude: "low" }
+  if (desc === "bonus") return { bucket: "Other", magnitude: "low" }
 
-  // Board meeting outcomes without results in announcement
+  if (
+    desc.includes("insolvency") ||
+    desc.includes("resolution process") ||
+    desc.includes("liquidation")
+  ) return { bucket: "Other", magnitude: "low" }
+
   if (
     desc === "action(s) taken or orders passed" ||
     desc === "actions taken or orders passed" ||
@@ -96,7 +95,6 @@ function keywordClassify(
     desc.includes("change in management") ||
     desc.includes("change in registrar")
   ) {
-    // Only rescue if announcement text confirms results
     const hasResults =
       ann.includes("financial results") ||
       ann.includes("results for the") ||
@@ -104,16 +102,6 @@ function keywordClassify(
       ann.includes("audited financial")
     if (!hasResults) return { bucket: "Other", magnitude: "low" }
   }
-
-  // Bonus shares — not a financial result
-  if (desc === "bonus") return { bucket: "Other", magnitude: "low" }
-
-  // Insolvency — not a signal bucket
-  if (
-    desc.includes("insolvency") ||
-    desc.includes("resolution process") ||
-    desc.includes("liquidation")
-  ) return { bucket: "Other", magnitude: "low" }
 
   // ── CONCALL & INVESTOR MEET ───────────────────────────────────────────────
   if (
@@ -226,24 +214,23 @@ async function classifyWithClaude(
 
 Classify each filing into exactly one bucket:
 
-- "Quarterly Results" → Company submitted financial results for any quarter/year. "Outcome of Board Meeting" often contains results — check announcement text carefully.
-- "Order Win" → New contract, work order, letter of award, order receipt, bagging of orders. Must be explicitly stated.
+- "Quarterly Results" → Company submitted financial results. "Outcome of Board Meeting" often contains results — check announcement text.
+- "Order Win" → New contract, work order, letter of award, order receipt. Must be explicitly stated.
 - "Capex Plan" → Capital expenditure, new plant, capacity expansion, greenfield, brownfield.
 - "Dividend" → Dividend declared, interim/final/special dividend, record date for dividend.
 - "Concall & Investor Meet" → Analyst meet, investor presentation, concall, conference call, earnings call.
-- "Other" → Everything else: clarifications, press releases, newspaper publications, regulatory filings, general updates, AGM/EGM, appointments, resignations, credit ratings, address changes, insolvency, bonus shares, corrigendum, delayed submission notices.
+- "Other" → Everything else.
 
 STRICT RULES:
-1. "Clarification" in description → always "Other"
+1. "Clarification" → always "Other"
 2. "Reasons for Delayed/Non-submission" → always "Other"
 3. "Corrigendum" → always "Other"
-4. "Action(s) taken or orders passed" → always "Other" (board meeting, NOT order win)
+4. "Action(s) taken or orders passed" → always "Other"
 5. "Outcome of Board Meeting" without results in announcement → "Other"
-6. "Press Release" → only classify as signal bucket if announcement text explicitly confirms results/order/capex/dividend
-7. "Updates" or "General Updates" → only classify as signal if announcement text is very explicit
+6. Only classify as Order Win/Capex if explicitly stated
 
 Return ONLY valid JSON array, no markdown:
-[{"seq_id":"...","bucket":"...","ai_summary":"one line max 15 words specific to this filing","magnitude":"high|medium|low"}]
+[{"seq_id":"...","bucket":"...","ai_summary":"one line max 15 words","magnitude":"high|medium|low"}]
 
 Filings:
 ${items.map(i => `seq_id:${i.seq_id} | desc:${i.description} | announcement:${(i.announcement || "").slice(0, 400)}`).join("\n---\n")}
@@ -272,8 +259,15 @@ ${items.map(i => `seq_id:${i.seq_id} | desc:${i.description} | announcement:${(i
   }
 }
 
-async function fetchWeek(fromDate: string, toDate: string, headers: any, cookies: string) {
-  const url = `https://www.nseindia.com/api/corporate-announcements?index=equities&from_date=${fromDate}&to_date=${toDate}`
+// ─── Fetch one week from NSE for a given segment ──────────────────────────────
+async function fetchWeek(
+  fromDate: string,
+  toDate: string,
+  headers: any,
+  cookies: string,
+  segment: "equities" | "sme"
+) {
+  const url = `https://www.nseindia.com/api/corporate-announcements?index=${segment}&from_date=${fromDate}&to_date=${toDate}`
   const res = await fetch(url, {
     headers: { ...headers, Cookie: cookies },
     signal: AbortSignal.timeout(10000),
@@ -283,10 +277,12 @@ async function fetchWeek(fromDate: string, toDate: string, headers: any, cookies
   return Array.isArray(data) ? data : []
 }
 
+// ─── Main Route ───────────────────────────────────────────────────────────────
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const mode = searchParams.get("mode")
+    const mode    = searchParams.get("mode")
+    const segmentParam = searchParams.get("segment") as "equities" | "sme" | null
 
     const baseHeaders = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -310,18 +306,28 @@ export async function GET(request: Request) {
       ranges = [{ from: formatForNse(twoDaysAgo), to: formatForNse(today) }]
     }
 
-    // Step 3: Fetch from NSE
-    let allRaw: any[] = []
+    // Step 3: Determine which segments to fetch
+    const segments: ("equities" | "sme")[] = segmentParam
+      ? [segmentParam]
+      : ["equities", "sme"] // fetch both by default
+
+    // Step 4: Fetch from NSE for each range + segment
+    let allRaw: { data: any; segment: "equities" | "sme" }[] = []
+
     for (const range of ranges) {
-      const data = await fetchWeek(range.from, range.to, baseHeaders, cookies)
-      allRaw = [...allRaw, ...data]
-      if (ranges.length > 1) await new Promise((r) => setTimeout(r, 500))
+      for (const seg of segments) {
+        const data = await fetchWeek(range.from, range.to, baseHeaders, cookies, seg)
+        data.forEach((item: any) => allRaw.push({ data: item, segment: seg }))
+        if (ranges.length > 1 || segments.length > 1) {
+          await new Promise((r) => setTimeout(r, 400))
+        }
+      }
     }
 
     if (allRaw.length === 0) return Response.json({ error: "No data from NSE" })
 
-    // Step 4: Transform + keyword classify
-    const transformed = allRaw.map((item: any) => {
+    // Step 5: Transform + keyword classify
+    const transformed = allRaw.map(({ data: item, segment: seg }) => {
       const { bucket, magnitude } = keywordClassify(item.desc || "", item.attchmntText || "")
       return {
         seq_id:         item.seq_id,
@@ -331,13 +337,14 @@ export async function GET(request: Request) {
         announcement:   item.attchmntText,
         attachment_url: item.attchmntFile,
         filing_time:    convertNseDate(item.an_dt),
+        segment:        seg,
         bucket,
         magnitude,
         ai_summary:     null,
       }
     })
 
-    // Step 5: Upsert in batches of 100
+    // Step 6: Upsert in batches of 100
     let totalUpserted = 0
     for (let i = 0; i < transformed.length; i += 100) {
       const batch = transformed.slice(i, i + 100)
@@ -347,7 +354,7 @@ export async function GET(request: Request) {
       if (!error) totalUpserted += batch.length
     }
 
-    // Step 6: Claude processes signal rows with no ai_summary
+    // Step 7: Claude processes signal rows with no ai_summary
     const { data: needsAI } = await supabase
       .from("announcements")
       .select("seq_id, description, announcement, bucket")
@@ -374,13 +381,14 @@ export async function GET(request: Request) {
     }
 
     return Response.json({
-      success:        true,
-      mode:           mode || "daily",
-      ranges_fetched: ranges.length,
-      total_fetched:  allRaw.length,
-      total_upserted: totalUpserted,
-      sent_to_claude: needsAI?.length ?? 0,
-      ai_classified:  totalAIClassified,
+      success:          true,
+      mode:             mode || "daily",
+      segments_fetched: segments,
+      ranges_fetched:   ranges.length,
+      total_fetched:    allRaw.length,
+      total_upserted:   totalUpserted,
+      sent_to_claude:   needsAI?.length ?? 0,
+      ai_classified:    totalAIClassified,
     })
 
   } catch (err: any) {

@@ -10,10 +10,11 @@ const SIGNAL_BUCKETS = [
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const bucket = searchParams.get("bucket")
+    const bucket    = searchParams.get("bucket")
     const countOnly = searchParams.get("countOnly")
+    const segment   = searchParams.get("segment") || "equities"
 
-    // ── Count query — returns exact counts per bucket from full DB ──────────
+    // ── Exact counts per bucket for a given segment ──────────────────────────
     if (countOnly === "true") {
       const counts: Record<string, number> = {}
       await Promise.all(
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
             .from("announcements")
             .select("*", { count: "exact", head: true })
             .eq("bucket", b)
+            .eq("segment", segment)
             .gte("filing_time", "2026-01-01T00:00:00+05:30")
           counts[b] = count ?? 0
         })
@@ -29,12 +31,13 @@ export async function GET(request: Request) {
       return Response.json(counts)
     }
 
-    // ── Specific bucket fetch ───────────────────────────────────────────────
+    // ── Specific bucket + segment ────────────────────────────────────────────
     if (bucket && SIGNAL_BUCKETS.includes(bucket)) {
       const { data, error } = await supabase
         .from("announcements")
         .select("*")
         .eq("bucket", bucket)
+        .eq("segment", segment)
         .gte("filing_time", "2026-01-01T00:00:00+05:30")
         .order("filing_time", { ascending: false })
         .limit(500)
@@ -43,11 +46,12 @@ export async function GET(request: Request) {
       return Response.json(data ?? [])
     }
 
-    // ── Default: recent filings across all signal buckets ───────────────────
+    // ── Default: recent filings for segment ──────────────────────────────────
     const { data, error } = await supabase
       .from("announcements")
       .select("*")
       .in("bucket", SIGNAL_BUCKETS)
+      .eq("segment", segment)
       .gte("filing_time", "2026-01-01T00:00:00+05:30")
       .order("filing_time", { ascending: false })
       .limit(200)
