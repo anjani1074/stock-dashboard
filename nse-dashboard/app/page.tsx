@@ -77,7 +77,6 @@ function FilingCard({ item, bucket, isDark, index }: { item: Announcement; bucke
       style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 10, padding: "14px 18px", cursor: "pointer", transition: "all 0.15s ease", animation: `fadeUp 0.3s ${Math.min(index * 0.02, 0.25)}s both`, position: "relative", overflow: "hidden" }}
     >
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: bColor, borderRadius: "10px 0 0 10px", opacity: expanded ? 1 : 0.4, transition: "opacity 0.15s" }} />
-
       <div style={{ display: "flex", alignItems: "flex-start", gap: 14, paddingLeft: 6 }}>
         <div style={{ flexShrink: 0, minWidth: 80 }}>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700, color: bColor, letterSpacing: 0.5, marginBottom: 3 }}>{item.symbol}</div>
@@ -102,7 +101,6 @@ function FilingCard({ item, bucket, isDark, index }: { item: Announcement; bucke
           <span style={{ fontSize: 9, color: metaColor, fontFamily: "'IBM Plex Mono', monospace", transition: "transform 0.15s", transform: expanded ? "rotate(180deg)" : "rotate(0deg)", display: "inline-block" }}>▼</span>
         </div>
       </div>
-
       {expanded && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${divColor}`, paddingLeft: 6 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
@@ -134,25 +132,29 @@ function ThemeToggle({ isDark, onToggle }: { isDark: boolean; onToggle: () => vo
 }
 
 export default function Home() {
-  const [announcements, setAnnouncements]       = useState<Announcement[]>([])
-  const [pendingAnnouncements, setPending]       = useState<Announcement[]>([]) // background fetched, not shown yet
-  const [bucketCounts, setBucketCounts]          = useState<Record<string, number>>({})
-  const [loading, setLoading]                    = useState(true)
-  const [activeBucket, setActiveBucket]          = useState<string | null>(null)
-  const [activeSegment, setActiveSegment]        = useState<"equities" | "sme">("equities")
-  const [search, setSearch]                      = useState("")
-  const [lastUpdated, setLastUpdated]            = useState<Date | null>(null)
-  const [refreshing, setRefreshing]              = useState(false)
-  const [isDark, setIsDark]                      = useState(true)
-  const [newFilingsCount, setNewFilingsCount]    = useState(0) // how many new filings are pending
-  const isInitialLoad                            = useRef(true)
-  const currentSegmentRef                        = useRef(activeSegment)
-  const currentBucketRef                         = useRef(activeBucket)
+  const [announcements, setAnnouncements]    = useState<Announcement[]>([])
+  const [pendingAnnouncements, setPending]   = useState<Announcement[]>([])
+  const [bucketCounts, setBucketCounts]      = useState<Record<string, number>>({})
+  const [loading, setLoading]                = useState(true)
+  const [activeBucket, setActiveBucket]      = useState<string | null>(null)
+  const [activeSegment, setActiveSegment]    = useState<"equities" | "sme">("equities")
+  const [search, setSearch]                  = useState("")
+  const [lastUpdated, setLastUpdated]        = useState<Date | null>(null)
+  const [refreshing, setRefreshing]          = useState(false)
+  const [isDark, setIsDark]                  = useState(true)
+  const [newFilingsCount, setNewFilingsCount] = useState(0)
 
-  // Keep refs in sync
+  // Refs to track current values for background fetch
+  const currentSegmentRef  = useRef<"equities" | "sme">("equities")
+  const currentBucketRef   = useRef<string | null>(null)
+  const isFirstRender      = useRef(true)
+  const initialLoadDone    = useRef(false)
+
+  // Keep refs in sync with state
   useEffect(() => { currentSegmentRef.current = activeSegment }, [activeSegment])
   useEffect(() => { currentBucketRef.current  = activeBucket  }, [activeBucket])
 
+  // Theme
   useEffect(() => {
     const saved = localStorage.getItem("theme")
     if (saved) setIsDark(saved === "dark")
@@ -164,14 +166,6 @@ export default function Home() {
     localStorage.setItem("theme", next ? "dark" : "light")
   }
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const bucket  = params.get("bucket")
-    const segment = params.get("segment") as "equities" | "sme" | null
-    if (bucket && SIGNAL_BUCKETS.includes(bucket)) setActiveBucket(bucket)
-    if (segment === "sme") setActiveSegment("sme")
-  }, [])
-
   const fetchCounts = useCallback(async (segment: string) => {
     try {
       const res    = await fetch(`/api/announcements?countOnly=true&segment=${segment}`)
@@ -180,11 +174,15 @@ export default function Home() {
     } catch (e) { console.error(e) }
   }, [])
 
-  // ── Initial / manual fetch — replaces current data ─────────────────────────
-  const fetchData = useCallback(async (bucket: string | null, segment: string, showRefresh = false) => {
+  // Full replace fetch — used on initial load and manual tab switches
+  const fetchData = useCallback(async (
+    bucket: string | null,
+    segment: string,
+    showRefresh = false
+  ) => {
     if (showRefresh) setRefreshing(true)
     setLoading(true)
-    setAnnouncements([]) // clear immediately to avoid mixing segments
+    setAnnouncements([])   // clear immediately — prevents mixing
     setPending([])
     setNewFilingsCount(0)
     try {
@@ -197,12 +195,16 @@ export default function Home() {
         setLastUpdated(new Date())
       }
     } catch (e) { console.error(e) }
-    finally { setLoading(false); setRefreshing(false); isInitialLoad.current = false }
+    finally {
+      setLoading(false)
+      setRefreshing(false)
+      initialLoadDone.current = true
+    }
   }, [])
 
-  // ── Background fetch — don't replace, just detect new filings ──────────────
+  // Background fetch — silent, no scroll disruption
   const fetchBackground = useCallback(async () => {
-    if (isInitialLoad.current) return // skip if initial load not done
+    if (!initialLoadDone.current) return
     try {
       const segment = currentSegmentRef.current
       const bucket  = currentBucketRef.current
@@ -212,23 +214,22 @@ export default function Home() {
       const data = await res.json()
       if (!Array.isArray(data)) return
 
-      // Update counts silently
-      fetchCounts(segment)
+      fetchCounts(segment) // update counts silently
 
-      // Compare with current — find genuinely new filings
+      // Compare — only show banner if genuinely new filings
       setAnnouncements((current) => {
         const currentIds = new Set(current.map((a) => a.id))
         const newOnes    = data.filter((a: Announcement) => !currentIds.has(a.id))
         if (newOnes.length > 0) {
-          setPending(data) // store full updated list
+          setPending(data)
           setNewFilingsCount(newOnes.length)
         }
-        return current // don't change what user sees
+        return current // don't disrupt user
       })
     } catch (e) { console.error(e) }
   }, [fetchCounts])
 
-  // ── Apply pending updates when user clicks banner ──────────────────────────
+  // Apply pending when user clicks banner
   function applyPendingUpdates() {
     setAnnouncements(pendingAnnouncements)
     setPending([])
@@ -237,18 +238,37 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  // On mount
-  useEffect(() => { fetchCounts(activeSegment); fetchData(null, activeSegment) }, [])
-
-  // When segment or bucket changes — do a full replace fetch
+  // ── SINGLE MOUNT EFFECT — reads URL first, then fetches ──────────────────
+  // This guarantees correct segment/bucket before any fetch happens
   useEffect(() => {
-    if (!isInitialLoad.current) {
-      fetchCounts(activeSegment)
-      fetchData(activeBucket, activeSegment)
-    }
-  }, [activeSegment, activeBucket])
+    const params  = new URLSearchParams(window.location.search)
+    const bucket  = params.get("bucket")
+    const segment = (params.get("segment") as "equities" | "sme") || "equities"
 
-  // Background refresh every 30s — silent, no scroll disruption
+    // Set state
+    if (bucket && SIGNAL_BUCKETS.includes(bucket)) {
+      setActiveBucket(bucket)
+      currentBucketRef.current = bucket
+    }
+    setActiveSegment(segment)
+    currentSegmentRef.current = segment
+
+    // Fetch with correct values immediately — don't wait for state
+    fetchCounts(segment)
+    fetchData(bucket && SIGNAL_BUCKETS.includes(bucket) ? bucket : null, segment)
+  }, []) // eslint-disable-line
+
+  // ── User-initiated tab/bucket switch — skip first render ─────────────────
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    fetchCounts(activeSegment)
+    fetchData(activeBucket, activeSegment)
+  }, [activeSegment, activeBucket]) // eslint-disable-line
+
+  // Background refresh every 30s
   useEffect(() => {
     const interval = setInterval(fetchBackground, 30000)
     return () => clearInterval(interval)
@@ -283,7 +303,7 @@ export default function Home() {
 
   const totalSignal = Object.values(bucketCounts).reduce((a, b) => a + b, 0)
 
-  // Theme
+  // Theme values
   const bg           = isDark ? "#0a0d12"                : "#f8fafc"
   const headerBg     = isDark ? "rgba(10,13,18,0.92)"   : "rgba(248,250,252,0.92)"
   const headerBorder = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)"
@@ -303,14 +323,13 @@ export default function Home() {
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)"}; border-radius: 2px; }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes fadeDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+        @keyframes fadeUp   { from { opacity:0; transform:translateY(8px);  } to { opacity:1; transform:translateY(0); } }
+        @keyframes fadeDown { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes spin   { to { transform: rotate(360deg); } }
+        @keyframes pulse  { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
         .bucket-card:hover { transform: translateY(-2px); }
         .filing-row:hover { background: ${isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.02)"} !important; border-color: ${isDark ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.14)"} !important; }
         .seg-tab:hover { opacity: 0.85; }
-        .new-banner:hover { opacity: 0.9; }
       `}</style>
 
       <div style={{ minHeight: "100vh", background: bg, color: isDark ? "#e2e8f0" : "#1e293b", fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "background 0.2s" }}>
@@ -322,34 +341,10 @@ export default function Home() {
           </>
         )}
 
-        {/* ── NEW FILINGS BANNER ── */}
+        {/* NEW FILINGS BANNER */}
         {newFilingsCount > 0 && (
-          <div
-            className="new-banner"
-            onClick={applyPendingUpdates}
-            style={{
-              position: "fixed",
-              top: 64,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 200,
-              background: isDark ? "rgba(16,185,129,0.95)" : "#059669",
-              color: "#fff",
-              padding: "8px 20px",
-              borderRadius: 20,
-              fontSize: 12,
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              cursor: "pointer",
-              boxShadow: "0 4px 20px rgba(16,185,129,0.4)",
-              animation: "fadeDown 0.3s both",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              whiteSpace: "nowrap",
-            }}
-          >
+          <div onClick={applyPendingUpdates}
+            style={{ position: "fixed", top: 64, left: "50%", transform: "translateX(-50%)", zIndex: 200, background: isDark ? "rgba(16,185,129,0.95)" : "#059669", color: "#fff", padding: "8px 20px", borderRadius: 20, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, letterSpacing: 0.5, cursor: "pointer", boxShadow: "0 4px 20px rgba(16,185,129,0.4)", animation: "fadeDown 0.3s both", display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
             <span style={{ animation: "pulse 1.5s infinite" }}>↑</span>
             {newFilingsCount} NEW FILING{newFilingsCount > 1 ? "S" : ""} — CLICK TO REFRESH
           </div>
@@ -373,10 +368,8 @@ export default function Home() {
               </span>
             )}
             <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
-            <button
-              onClick={() => { fetchCounts(activeSegment); fetchData(activeBucket, activeSegment, true) }}
-              style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${headerBorder}`, borderRadius: 8, padding: "6px 14px", color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)", fontSize: 11, cursor: "pointer", fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 6, letterSpacing: 0.3 }}
-            >
+            <button onClick={() => { fetchCounts(activeSegment); fetchData(activeBucket, activeSegment, true) }}
+              style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${headerBorder}`, borderRadius: 8, padding: "6px 14px", color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)", fontSize: 11, cursor: "pointer", fontFamily: "'IBM Plex Mono', monospace", display: "flex", alignItems: "center", gap: 6, letterSpacing: 0.3 }}>
               <span style={{ display: "inline-block", animation: refreshing ? "spin 0.8s linear infinite" : "none" }}>↻</span>
               REFRESH
             </button>
@@ -386,7 +379,7 @@ export default function Home() {
         <main style={{ maxWidth: 1280, margin: "0 auto", padding: "32px 28px 80px", position: "relative", zIndex: 1 }}>
 
           {isBucketView && activeBucketObj ? (
-            // ── BUCKET VIEW ─────────────────────────────────────────────────
+            // BUCKET VIEW
             <div style={{ marginBottom: 28, animation: "fadeUp 0.3s both" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
                 <span style={{ fontSize: 18, color: bColor }}>{activeBucketObj.icon}</span>
@@ -404,7 +397,7 @@ export default function Home() {
               </p>
             </div>
           ) : (
-            // ── MAIN DASHBOARD ───────────────────────────────────────────────
+            // MAIN DASHBOARD
             <>
               <div style={{ marginBottom: 24, animation: "fadeUp 0.3s both" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}>
@@ -502,7 +495,7 @@ export default function Home() {
               <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.5 }}>NO FILINGS FOUND</div>
               {activeSegment === "sme" && (
                 <div style={{ fontSize: 11, color: subColor, marginTop: 8, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                  SME data will appear after the next backfill
+                  Run a backfill from /admin to populate SME data
                 </div>
               )}
             </div>
