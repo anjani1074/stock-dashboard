@@ -26,7 +26,8 @@ async function fetchNSEQuote(symbol: string, cookies: string) {
     const metadata  = data?.metadata || {}
 
     const cmp        = parseFloat(priceInfo?.lastPrice || priceInfo?.close || 0)
-    const issuedSize = parseFloat(metadata?.issuedSize || info?.issuedSize || 0)
+   const securityInfo = data?.securityInfo || {}
+const issuedSize = parseFloat(securityInfo?.issuedSize || metadata?.issuedSize || info?.issuedSize || 0)
     const pe         = parseFloat(metadata?.pdSymbolPe || metadata?.pdSectorPe || 0)
     const sector     = info?.industry || info?.sector || metadata?.industry || ""
 
